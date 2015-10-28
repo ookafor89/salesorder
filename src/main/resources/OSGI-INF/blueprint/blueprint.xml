@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<blueprint xmlns="http://www.osgi.org/xmlns/blueprint/v1.0.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xmlns:camel="http://camel.apache.org/schema/blueprint"
+      xmlns:cxf="http://camel.apache.org/schema/blueprint/cxf"
+      xmlns:sec="http://cxf.apache.org/configuration/security"
+  	  xmlns:http="http://cxf.apache.org/transports/http/configuration"
+      xsi:schemaLocation="
+      http://www.osgi.org/xmlns/blueprint/v1.0.0 http://www.osgi.org/xmlns/blueprint/v1.0.0/blueprint.xsd
+      http://camel.apache.org/schema/blueprint/cxf http://camel.apache.org/schema/blueprint/cxf/camel-cxf.xsd
+      http://camel.apache.org/schema/blueprint http://camel.apache.org/schema/blueprint/camel-blueprint.xsd">
+      
+  <bean id="productGenerator" class="com.c2g.product_service.product.service.ProductGenerator"/>
+  <bean id="salesOrderGenerator" class="com.c2g.product_service.product.service.SalesOrderGenerator"/>
+  <bean id="productServiceImpl" class="com.c2g.product_service.product.service.ProductServiceImpl"/>
+  <bean id="salesOrderImpl" class="com.c2g.product_service.product.service.SalesOrderImpl"/>
+  <bean id="splitterBean" class="com.c2g.product_service.product.service.SplitterBean"/>
+  <bean id="jmsConnectionFactory" class="org.apache.activemq.ActiveMQConnectionFactory">
+    <property name="brokerURL" value="tcp://localhost:61616"/>
+    <property name="userName" value="admin"/>
+    <property name="password" value="admin"/>
+    <property name="clientID" value="ProductService"/>
+  </bean>
+
+  <bean id="pooledConnectionFactory" class="org.apache.activemq.pool.PooledConnectionFactory">
+    <property name="maxConnections" value="1"/>
+    <property name="maximumActiveSessionPerConnection" value="500"/>
+    <property name="connectionFactory" ref="jmsConnectionFactory"/>
+  </bean>
+  
+  <bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
+    <property name="connectionFactory" ref="pooledConnectionFactory"/>
+  </bean>
+
+  <cxf:rsServer id="SalesOrderService"
+        address="http://localhost:5000/SalesOrderService" serviceClass="com.javacodegeeks.ws.product_service.SalesOrderService" />
+
+ <cxf:cxfEndpoint id="salesOrderServiceEndpoint"
+        address="http://10.20.1.117:7047/DynamicsNAV80/WS/CRONUS%20International%20Ltd./Page/salesorder" serviceClass="schemas.dynamics.microsoft.page.salesorder.SalesorderPort">
+        <cxf:properties>
+           <entry key="loggingFeatureEnabled" value="true" />
+        </cxf:properties>
+        
+ </cxf:cxfEndpoint>
+
+    <http:conduit name="{urn:microsoft-dynamics-schemas/page/salesorder}salesorder_PortPort.http-conduit">
+       <http:client
+               AllowChunking="false"
+               MaxRetransmits="11"
+               Connection="Keep-Alive"
+               ReceiveTimeout="60000"
+               CacheControl="No-Cache"
+               AutoRedirect="true"
+               />
+               
+         <http:authorization>
+            <sec:UserName>WIN-LOALMMB2JE9\administrator</sec:UserName>
+            <sec:Password>#124#Digitzs</sec:Password>            
+            <sec:Authorization>NTLM</sec:Authorization>
+        </http:authorization>          
+   </http:conduit>
+  		
+
+  
+   
+  <camelContext xmlns="http://camel.apache.org/schema/blueprint">
+  <restConfiguration component="restlet" port="8080" bindingMode="auto"/>
+  <rest path="/SalesOrder">
+    <post uri="/create" consumes="application/json">
+      <to uri="direct:create-sales-order"/>
+    </post>
+    <get uri="/bye" consumes="application/json">
+      <to uri="direct:bye"/>
+    </get>
+    <post uri="/bye">
+      <to uri="mock:update"/>
+    </post>
+  </rest>
+  <route id="fileSplitter">
+    <from uri="file://json?delete=true"/>
+    <log message="working on it ${body}"/>
+    <split>
+      <expressionDefinition/>
+      <bean ref="splitterBean"/>
+      <to uri="direct:createSalesOrder"/>
+    </split>
+  </route>
+  <route id="wsClient">
+    <from uri="direct:createSalesOrder"/>
+    <bean ref="salesOrderGenerator" method="getSalesOrder"/>
+    <setHeader headerName="operationName">
+      <simple>Create</simple>
+    </setHeader>
+    <to uri="cxf:bean:salesOrderServiceEndpoint"/>
+    <bean ref="salesOrderGenerator" method="onCreate"/>
+    <log message="the released sales order ${body}"/>
+  </route>
+</camelContext>
+
+</blueprint>
